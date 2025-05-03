@@ -23,20 +23,16 @@ DIFFICULTIES = {
 class GameBody:
     def __init__(self, bitfile_path):
         self.ol = Overlay(bitfile_path)
-        print("Available IPs in overlay:")
-        for name in self.ol.ip_dict:
-            print(name)
-        print("End of IP block")
+        #print("Available IPs in overlay:")
+        #for name in self.ol.ip_dict:
+        #    print(name)
+        #print("End of IP block")
         self.led = self.ol.led.channel1
-        self.switches = self.ol.sw.channel1
+        self.switches = self.ol.sw.channel1 
         self.btn = self.ol.btn.channel1
-        self.score = 0
-        self.w, self.h = 1024, 600 # VGA/display dimension
+        self.score = 2
+        self.w, self.h = 1024, 600 # VGA/display dimension 
         self.grid = [[' ' for _ in range(self.w)] for _ in range(self.h)]
-        self.last_1hz = time.time() #probably needs the clock to maintain system
-        self.last_4hz = time.time()
-        self.last_btn_press = time.time()
-        self.btn_pressed = False
 
     def read_inputs(self):
         current_time = time.time()
@@ -45,22 +41,22 @@ class GameBody:
         return {
             'din': self.switches.read() & 0x0F,
             'btn_c': (btn_val & 0x01) == 0x01,     # bit 0 -> Center
-            'btn_u': (btn_val & 0x02) == 0x02,     # bit 1 -> Up
-            'btn_d': (btn_val & 0x04) == 0x04,     # bit 2 -> Down
-            'btn_l': (btn_val & 0x08) == 0x08,     # bit 3 -> Left
+            'btn_d': (btn_val & 0x02) == 0x02,     # bit 1 -> Up
+            'btn_l': (btn_val & 0x04) == 0x04,     # bit 2 -> Down
+            'btn_u': (btn_val & 0x08) == 0x08,     # bit 3 -> Left
             'btn_r': (btn_val & 0x10) == 0x10,     # bit 4 -> Right
         }
-
+    
     def inputs_to_key(self, inputs):
         # converts input to key
         if inputs['btn_u']:
-            return 'up'
+            return 'btn_u'
         elif inputs['btn_d']:
-            return 'down'
+            return 'btn_d'
         elif inputs['btn_l']:
-            return 'left'
+            return 'btn_l'
         elif inputs['btn_r']:
-            return 'right'
+            return 'btn_r'
         return None
 
     def select_difficulty(self):
@@ -70,39 +66,40 @@ class GameBody:
                 print("Difficulty is : ", answer)
                 return DIFFICULTIES[answer]
             print('Invalid option, please type 1, 2 or 3.\n')
-
+    
     def init_snake(self):
         snake1 = [
             [15, 10],
             [14, 10],
             [13, 10],
         ]
-        return snake1
+        return snake1    
 
     def draw_snake(self, snake):
         #grid: Grid, snake: Snake -> None, controls VGA
         snake_head, snake_body = snake[0], snake[1:]
+        print("Snake head position: ", snake_head)
+        print("Snake body position: ", snake_body)
         self.grid[snake_head[0]][snake_head[1]] = '@'
         for part in snake_body:
             self.grid[part[0]][part[1]] = '#'
 
     def draw_food(self, food):
-                #grid: Grid, food: Food -> None, controls VGA
+        #grid: Grid, food: Food -> None, controls VGA
         self.grid[food[0]][food[1]] = 'F'
 
     def snake_hit_wall(self, snake, window_size):
         #snake: Snake, window_size: Tuple[int, int] -> bool, T if snake hits wall
         head = snake[0]
-        for dim, h in zip(window_size, head):
-            if not 0 < h < (dim-1):
-                return True
+        if head[0] > window_size[1]-1 or head[0] < 0 or head[1] < 0 or head[1] > window_size[0]-1:
+            return True
         return False
 
     def snake_hit_self(self, snake):
-        #snake: Snake -> bool , T if snake hit itself
+        #snake: Snake -> bool , T if snake hit itself    
         return snake[0] in snake[1:]
 
-    def snake_changed_direction(self, direction, inputs):
+    def snake_changed_direction(self, direction, key):
         """Checks whether the user pressed a key that's in a different direction
         compared to the direction of the snake's movement."""
         # direction: str, inputs: dict -> bool
@@ -116,9 +113,10 @@ class GameBody:
             if key == k and direction == d:
                 return False
         return True
-    
+
+
     def extend_snake_head(self, snake, direction):
-        """Extends the snake head one space in the given direction.
+        """Extends the snake head one space in the given direction. 
         The body remains in the same position."""
         #snake: Snake, direction: str -> None
         head = copy.copy(snake[0])
@@ -148,50 +146,46 @@ class GameBody:
         tail = snake.pop()
         #window.addch(*tail, ' ') # clears the tail on screen, figure out how to do this without window
 
-    def game_is_over(self, snake, window_size):
-        #snake: SNAKE, window_size: tuple[int, int] -> bool
-        print("hit wall: ", self.snake_hit_wall(snake, window_size))
-        print("hit self: ", self.snake_hit_self(snake))
-        return self.snake_hit_wall(snake, window_size) or self.snake_hit_self(snake)
-
     def run(self):
-        #Game logic, returns score: int
+        #Game logic, returns score: int 
         window_size = [self.w, self.h]  # (x, y) of VGA display
         snake = self.init_snake()  # starting snake
         self.draw_snake(snake)
         food = self.Gen_food(window_size)  # generate food
+        food = [22, 10]
         self.draw_food(food)  # draw food on the screen
         inputs = self.read_inputs()
         DIRECTIONS = {
-            inputs['btn_l']: 'left',
-            inputs['btn_r']: 'right',
-            inputs['btn_u']: 'up',
-            inputs['btn_d']: 'down'
+            'btn_l': 'left',
+            'btn_r': 'right',
+            'btn_u': 'up',
+            'btn_d': 'down'
         }
         # set initial direction for snake 1
         key, direction = 'btn_d', 'down'
-        print(inputs)
-        print(self.last_btn_press, self.btn_pressed)
+        #use inputs['din'] to select difficulty
         while inputs['btn_c'] == 0:
-            time.sleep(0.01)  # wait for signal
+            time.sleep(0.01)  # wait for signal 
             inputs = self.read_inputs() # need to loop func to read signal
-            print("press BTNC to start")
-        print("Signal received!")
-        while True:
+        print("Game Start!")
+        while True: 
+            time.sleep(0.1) # simulates a 10hz clock to slow down program
             next_key = self.inputs_to_key(self.read_inputs())
-            key = next_key if next_key != -1 else key
+            key = next_key if next_key != None else key
             print("This is Key: ", key)
             direction = DIRECTIONS[key] if self.snake_changed_direction(direction, key) else direction
             self.extend_snake_head(snake, direction) # changes the snake direction
             if self.snake_ate_food(snake, food):
+                print("Snake Ate food!")
                 food = self.Gen_food(window_size)
-                self.draw_food(self.grid, food)
+                self.draw_food(food)
                 self.score += 1
             else:
-                tail = self.shorten_snake(self.grid, snake)
-            if self.game_is_over(snake, window_size):
+                #print("Didn't eat food")
+                tail = self.shorten_snake(snake)
+            if (self.snake_hit_wall(snake, window_size) or self.snake_hit_self(snake)):
                 return self.score
-            self.draw_snake(self.grid, snake)
+            self.draw_snake(snake)
 
 def print_score(score):
     """Prints the score onto the screen."""
@@ -207,3 +201,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
