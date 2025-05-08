@@ -14,11 +14,18 @@ from pynq import Overlay
 
 
 
-DIFFICULTIES = {
-    '1': 500,
-    '2': 200,
-    '3': 40
+#DIFFICULTIES = {
+#    '1': 500,
+#    '2': 200,
+#    '3': 40
+#}
+
+DIFFICULTY_SPEEDS = {
+    0b001: 0.8,   # SW0 -> Easy
+    0b010: 0.5,  # SW1 -> Medium
+    0b100: 0.1   # SW2 -> Hard
 }
+
 
 class GameBody:
     def __init__(self, bitfile_path):
@@ -44,10 +51,8 @@ class GameBody:
             'btn_c': (btn_val & 0x01) == 0x01,     # bit 0 -> Center
             'btn_d': (btn_val & 0x02) == 0x02,     # bit 1 -> Up
             'btn_l': (btn_val & 0x04) == 0x04,     # bit 2 -> Down
-            #'btn_u': (btn_val & 0x08) == 0x08,     # bit 3 -> Left
-            #'btn_r': (btn_val & 0x10) == 0x10,     # bit 4 -> Right
-            'btn_u': (btn_val & 0x10) == 0x10,     # bit 3 -> Left
-            'btn_r': (btn_val & 0x08) == 0x08,     # bit 4 -> Right
+            'btn_r': (btn_val & 0x08) == 0x08,     # bit 3 -> Left
+            'btn_u': (btn_val & 0x10) == 0x10,     # bit 4 -> Right
         }
     
     def inputs_to_key(self, inputs):
@@ -148,9 +153,6 @@ class GameBody:
         #snake: Snake
         tail = snake.pop()
         #window.addch(*tail, ' ') # clears the tail on screen, figure out how to do this without window
-        #tail = snake[-1]
-        #self.grid[tail[0]][tail[1]] = ' '
-        #print("Tail position: ", tail)
 
     def init_grid(self):
         self.grid = [[' ' for _ in range(self.w)] for _ in range(self.h)]
@@ -193,10 +195,17 @@ class GameBody:
         while inputs['btn_c'] == 0:
             time.sleep(0.01)  # wait for signal 
             inputs = self.read_inputs() # need to loop func to read signal
+            
+        difficulty_raw = inputs['din']
+        speed = 0.5 # default speed when no switches are on (medium difficulty)
+        if difficulty_raw in DIFFICULTY_SPEEDS:
+            speed = DIFFICULTY_SPEEDS[difficulty_raw]
+            self.led.write(difficulty_raw)
+        
         print("Game Start!")
         while True: 
             
-            time.sleep(0.5) # simulates a 10hz clock to slow down program
+            time.sleep(speed) # simulates a 10hz clock to slow down program
             next_key = self.inputs_to_key(self.read_inputs())
             key = next_key if next_key != None else key
             print("This is Key: ", key)
