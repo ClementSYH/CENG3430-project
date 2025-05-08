@@ -43,8 +43,8 @@ class GameBody:
             'btn_c': (btn_val & 0x01) == 0x01,     # bit 0 -> Center
             'btn_d': (btn_val & 0x02) == 0x02,     # bit 1 -> Up
             'btn_l': (btn_val & 0x04) == 0x04,     # bit 2 -> Down
-            'btn_u': (btn_val & 0x08) == 0x08,     # bit 3 -> Left
-            'btn_r': (btn_val & 0x10) == 0x10,     # bit 4 -> Right
+            'btn_r': (btn_val & 0x08) == 0x08,     # bit 3 -> Left
+            'btn_u': (btn_val & 0x10) == 0x10,     # bit 4 -> Right
         }
     
     def inputs_to_key(self, inputs):
