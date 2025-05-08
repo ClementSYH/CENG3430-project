@@ -31,7 +31,8 @@ class GameBody:
         self.switches = self.ol.sw.channel1 
         self.btn = self.ol.btn.channel1
         self.score = 2
-        self.w, self.h = 1024, 600 # VGA/display dimension 
+        #self.w, self.h = 1024, 600 # VGA/display dimension 
+        self.w, self.h = 60, 30 # to test on jupiter
         self.grid = [[' ' for _ in range(self.w)] for _ in range(self.h)]
 
     def read_inputs(self):
@@ -43,8 +44,10 @@ class GameBody:
             'btn_c': (btn_val & 0x01) == 0x01,     # bit 0 -> Center
             'btn_d': (btn_val & 0x02) == 0x02,     # bit 1 -> Up
             'btn_l': (btn_val & 0x04) == 0x04,     # bit 2 -> Down
-            'btn_r': (btn_val & 0x08) == 0x08,     # bit 3 -> Left
-            'btn_u': (btn_val & 0x10) == 0x10,     # bit 4 -> Right
+            #'btn_u': (btn_val & 0x08) == 0x08,     # bit 3 -> Left
+            #'btn_r': (btn_val & 0x10) == 0x10,     # bit 4 -> Right
+            'btn_u': (btn_val & 0x10) == 0x10,     # bit 3 -> Left
+            'btn_r': (btn_val & 0x08) == 0x08,     # bit 4 -> Right
         }
     
     def inputs_to_key(self, inputs):
@@ -145,7 +148,27 @@ class GameBody:
         #snake: Snake
         tail = snake.pop()
         #window.addch(*tail, ' ') # clears the tail on screen, figure out how to do this without window
+        #tail = snake[-1]
+        #self.grid[tail[0]][tail[1]] = ' '
+        #print("Tail position: ", tail)
 
+    def init_grid(self):
+        self.grid = [[' ' for _ in range(self.w)] for _ in range(self.h)]
+
+
+    def print_grid(self):
+        
+        for y in range(self.h):
+            self.grid[y][0] = '|'
+            self.grid[y][self.w - 1] = '|'
+        for x in range(self.w):
+            self.grid[0][x] = '-'
+            self.grid[self.h - 1][x] = '-'
+        self.grid[0][0] = self.grid[0][self.w - 1] = '+'
+        self.grid[self.h - 1][0] = self.grid[self.h - 1][self.w - 1] = '+'
+        for row in self.grid[:self.h]:  # limit output height for readability
+            print(''.join(row[:self.w]))  # limit output width for readability    
+    
     def run(self):
         #Game logic, returns score: int 
         window_size = [self.w, self.h]  # (x, y) of VGA display
@@ -155,6 +178,9 @@ class GameBody:
         food = [22, 10]
         self.draw_food(food)  # draw food on the screen
         inputs = self.read_inputs()
+        
+        self.print_grid()
+        
         DIRECTIONS = {
             'btn_l': 'left',
             'btn_r': 'right',
@@ -169,7 +195,8 @@ class GameBody:
             inputs = self.read_inputs() # need to loop func to read signal
         print("Game Start!")
         while True: 
-            time.sleep(0.1) # simulates a 10hz clock to slow down program
+            
+            time.sleep(0.5) # simulates a 10hz clock to slow down program
             next_key = self.inputs_to_key(self.read_inputs())
             key = next_key if next_key != None else key
             print("This is Key: ", key)
@@ -181,11 +208,15 @@ class GameBody:
                 self.draw_food(food)
                 self.score += 1
             else:
-                #print("Didn't eat food")
-                tail = self.shorten_snake(snake)
+                print("Didn't eat food")
+                self.shorten_snake(snake)
             if (self.snake_hit_wall(snake, window_size) or self.snake_hit_self(snake)):
                 return self.score
+            
             self.draw_snake(snake)
+            self.print_grid()
+            self.init_grid()
+            self.draw_food(food)
 
 def print_score(score):
     """Prints the score onto the screen."""
