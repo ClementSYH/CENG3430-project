@@ -200,7 +200,6 @@ class GameBody:
         speed = 0.5 # default speed when no switches are on (medium difficulty)
         if difficulty_raw in DIFFICULTY_SPEEDS:
             speed = DIFFICULTY_SPEEDS[difficulty_raw]
-            self.led.write(difficulty_raw)
         
         print("Game Start!")
         while True: 
