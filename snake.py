@@ -106,7 +106,7 @@ class GameBody:
         snake_head, snake_body = snake[0], snake[1:]
         print("Snake 2 head position: ", snake_head)
         print("Snake 2 body position: ", snake_body)
-        self.grid[snake_head[0]][snake_head[1]] = 'O'
+        self.grid[snake_head[0]][snake_head[1]] = 'X'
         for part in snake_body:
             self.grid[part[0]][part[1]] = 'o'
 
