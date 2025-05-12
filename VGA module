@@ -1,0 +1,156 @@
+library IEEE;
+use IEEE.STD_LOGIC_1164.all;
+use IEEE.NUMERIC_STD.all;
+
+entity vga_driver is
+    port (
+        clk : in std_logic;
+        BTNL, BTNR, BTNU, BTND : in std_logic;
+        hsync, vsync : out std_logic;
+        red, green, blue : out std_logic_vector(3 downto 0)
+    );
+end vga_driver;
+
+architecture vga_driver_arch of vga_driver is
+
+    signal clk50MHz : std_logic;
+    signal clk10Hz : std_logic;
+    signal hcount, vcount : integer := 0;
+
+    -- VGA timing constants
+    constant H_TOTAL : integer := 1344 - 1;
+    constant H_SYNC : integer := 48 - 1;
+    constant H_BACK : integer := 240 - 1;
+    constant H_START : integer := 48 + 240 - 1;
+    constant H_ACTIVE : integer := 1024 ;
+    constant H_END : integer := 1344 - 32 - 1;
+    constant H_FRONT : integer := 32 - 1;
+
+    constant V_TOTAL : integer := 625 - 1;
+    constant V_SYNC : integer := 3 - 1;
+    constant V_BACK : integer := 12 - 1;
+    constant V_START : integer := 3 + 12 - 1;
+    constant V_ACTIVE : integer := 600 - 1;
+    constant V_END : integer := 625 - 10 - 1;
+    constant V_FRONT : integer := 10 - 1;
+
+    -- Grid parameters
+    constant GRID_WIDTH : integer := 50;  -- 50 columns
+    constant GRID_HEIGHT : integer := 30;  -- 30 rows
+    constant CELL_SIZE : integer := H_ACTIVE/GRID_WIDTH;    -- 20x20 pixels per cell
+
+    -- Type for grid memory
+    type grid_row is array (0 to GRID_WIDTH) of std_logic;
+    type grid_mem is array (0 to GRID_HEIGHT-1) of grid_row;
+    
+    type square_coords is array (0 to 4, 0 to 1) of integer;
+    
+    -- Function to initialize grid with specific squares
+    impure function init_grid return grid_mem is
+        variable temp_grid : grid_mem := (others => (others => '0'));
+        -- 2D array of coordinates: [x,y] pairs
+        constant squares : square_coords := (
+            (25, 15), --center (supposedly)
+            (1,0), --top left
+            (49, 0), -- top right
+            (49,29), --bottom right
+            (1,29) --bottom left
+        );
+        variable x, y : integer;
+    begin
+        -- Set squares from 2D array
+        for i in 0 to 4 loop
+            x := squares(i, 0);  -- Get x coordinate
+            y := squares(i, 1);  -- Get y coordinate
+            if x < GRID_WIDTH and y < GRID_HEIGHT then
+                temp_grid(y)(x) := '1';
+            end if;
+        end loop;
+        return temp_grid;
+    end function;
+    
+    signal grid : grid_mem := init_grid;
+
+    component clock_divider is
+        generic (N : integer);
+        port (
+            clk : in std_logic;
+            clk_out : out std_logic
+        );
+    end component;
+
+begin
+    -- Clock generation
+    comp_clk50MHz : clock_divider generic map(N => 1) port map(clk, clk50MHz);
+    comp_clk10Hz : clock_divider generic map(N => 5000000) port map(clk, clk10Hz);
+
+    -- Counters
+    hcount_proc : process (clk50MHz)
+    begin
+        if rising_edge(clk50MHz) then
+            if hcount = H_TOTAL then
+                hcount <= 0;
+            else
+                hcount <= hcount + 1;
+            end if;
+        end if;
+    end process;
+
+    vcount_proc : process (clk50MHz)
+    begin
+        if rising_edge(clk50MHz) then
+            if hcount = H_TOTAL then
+                if vcount = V_TOTAL then
+                    vcount <= 0;
+                else
+                    vcount <= vcount + 1;
+                end if;
+            end if;
+        end if;
+    end process;
+
+    -- Sync generation
+    hsync <= '0' when hcount < H_SYNC else '1';
+    vsync <= '0' when vcount < V_SYNC else '1';
+
+    -- Grid display process
+    data_output_proc : process (hcount, vcount)
+        variable grid_x, grid_y : integer;
+    begin
+        if (hcount >= H_START and hcount < H_END) and 
+           (vcount >= V_START and vcount < V_END) then
+            
+            -- Calculate grid coordinates
+            grid_x := (hcount - H_START) / CELL_SIZE;
+            grid_y := (vcount - V_START) / CELL_SIZE;
+
+            -- Check if this pixel is in an active grid cell
+            if grid_y >= 0 and grid_y < GRID_HEIGHT and 
+               grid_x >= 0 and grid_x < GRID_WIDTH then
+                
+                if grid(grid_y)(grid_x) = '1' then
+                    -- Draw active cell (purple)
+                    red <= "1111";
+                    green <= "0000";
+                    blue <= "1111";
+                else
+                    -- Background (white)
+                    red <= "1111";
+                    green <= "1111";
+                    blue <= "1111";
+                end if;
+            else
+                -- Outside grid area (shouldn't happen)
+                red <= "1111";
+                green <= "1111";
+                blue <= "1111";
+            end if;
+        else
+            -- Blanking area
+            red <= "0000";
+            green <= "0000";
+            blue <= "0000";
+        end if;
+    end process;
+
+end vga_driver_arch;
