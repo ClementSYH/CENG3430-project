@@ -49,7 +49,7 @@ architecture vga_driver_arch of vga_driver is
     impure function init_grid return grid_mem is
         variable temp_grid : grid_mem := (others => (others => '0'));
         -- 2D array of coordinates: [x,y] pairs
-        constant squares : square_coords := (
+        variable squares : square_coords := (
             (25, 15), --center (supposedly)
             (1,0), --top left
             (49, 0), -- top right
