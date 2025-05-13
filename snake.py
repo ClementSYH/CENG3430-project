@@ -13,12 +13,12 @@ from pynq import Overlay
 # VGA allows 12 bit color video output
 
 
-
-DIFFICULTIES = {
-    '1': 500,
-    '2': 200,
-    '3': 40
+DIFFICULTY_SPEEDS = {
+    0b001: 0.8,   # SW0 -> Easy
+    0b010: 0.5,  # SW1 -> Medium
+    0b100: 0.1   # SW2 -> Hard
 }
+
 
 class GameBody:
     def __init__(self, bitfile_path):
@@ -30,42 +30,52 @@ class GameBody:
         self.led = self.ol.led.channel1
         self.switches = self.ol.sw.channel1 
         self.btn = self.ol.btn.channel1
-        self.score = 2
-        self.w, self.h = 1024, 600 # VGA/display dimension 
+        self.score1 = 2 # snake 1
+        self.score2 = 2 # snake 2
+        #self.w, self.h = 1024, 600 # VGA/display dimension 
+        self.w, self.h = 60, 30 # to test on jupiter
         self.grid = [[' ' for _ in range(self.w)] for _ in range(self.h)]
 
     def read_inputs(self):
         current_time = time.time()
         self.last_btn_press = current_time
         btn_val = self.btn.read()
+        sw_val = self.switches.read()
         return {
             'din': self.switches.read() & 0x0F,
             'btn_c': (btn_val & 0x01) == 0x01,     # bit 0 -> Center
             'btn_d': (btn_val & 0x02) == 0x02,     # bit 1 -> Up
             'btn_l': (btn_val & 0x04) == 0x04,     # bit 2 -> Down
-            'btn_u': (btn_val & 0x08) == 0x08,     # bit 3 -> Left
-            'btn_r': (btn_val & 0x10) == 0x10,     # bit 4 -> Right
+            'btn_r': (btn_val & 0x08) == 0x08,     # bit 3 -> Left
+            'btn_u': (btn_val & 0x10) == 0x10,     # bit 4 -> Right
+            'sw_4': (sw_val & 0x10) == 0x10,
+            'sw_5': (sw_val & 0x20) == 0x20,
+            'sw_6': (sw_val & 0x40) == 0x40,
+            'sw_7': (sw_val & 0x80) == 0x80,
         }
     
-    def inputs_to_key(self, inputs):
-        # converts input to key
-        if inputs['btn_u']:
-            return 'btn_u'
-        elif inputs['btn_d']:
-            return 'btn_d'
-        elif inputs['btn_l']:
-            return 'btn_l'
-        elif inputs['btn_r']:
-            return 'btn_r'
+    def inputs_to_key_p1(self, inputs):
+        # converts input to key for snake 1
+        if inputs['btn_u']: return 'btn_u'
+        elif inputs['btn_d']: return 'btn_d'
+        elif inputs['btn_l']: return 'btn_l'
+        elif inputs['btn_r']: return 'btn_r'
+        return None
+    
+    def inputs_to_key_p2(self, inputs):
+        if inputs['sw_4']: return 'sw_4' # up
+        elif inputs['sw_5']: return 'sw_5' # down
+        elif inputs['sw_6']: return 'sw_6' # left
+        elif inputs['sw_7']: return 'sw_7' # right
         return None
 
-    def select_difficulty(self):
-        while True:
-            answer = input('Select game difficulty:\n(1): Easy\n(2): Normal\n(3): Hard\nYour choice: ')
-            if answer in DIFFICULTIES.keys():
-                print("Difficulty is : ", answer)
-                return DIFFICULTIES[answer]
-            print('Invalid option, please type 1, 2 or 3.\n')
+    #def select_difficulty(self):
+    #    while True:
+    #        answer = input('Select game difficulty:\n(1): Easy\n(2): Normal\n(3): Hard\nYour choice: ')
+    #        if answer in DIFFICULTIES.keys():
+    #            print("Difficulty is : ", answer)
+    #            return DIFFICULTIES[answer]
+    #        print('Invalid option, please type 1, 2 or 3.\n')
     
     def init_snake(self):
         snake1 = [
@@ -73,16 +83,32 @@ class GameBody:
             [14, 10],
             [13, 10],
         ]
-        return snake1    
+        snake2 = [
+            [15, 40], 
+            [14, 40], 
+            [13, 40]
+        ]
+        return snake1, snake2  
 
-    def draw_snake(self, snake):
+    def draw_snake1(self, snake):
+        #drawing function for both snakes
         #grid: Grid, snake: Snake -> None, controls VGA
         snake_head, snake_body = snake[0], snake[1:]
-        print("Snake head position: ", snake_head)
-        print("Snake body position: ", snake_body)
+        print("Snake 1 head position: ", snake_head)
+        print("Snake 1 body position: ", snake_body)
         self.grid[snake_head[0]][snake_head[1]] = '@'
         for part in snake_body:
             self.grid[part[0]][part[1]] = '#'
+
+    def draw_snake2(self, snake):
+        #drawing function for both snakes
+        #grid: Grid, snake: Snake -> None, controls VGA
+        snake_head, snake_body = snake[0], snake[1:]
+        print("Snake 2 head position: ", snake_head)
+        print("Snake 2 body position: ", snake_body)
+        self.grid[snake_head[0]][snake_head[1]] = 'X'
+        for part in snake_body:
+            self.grid[part[0]][part[1]] = 'o'
 
     def draw_food(self, food):
         #grid: Grid, food: Food -> None, controls VGA
@@ -99,7 +125,7 @@ class GameBody:
         #snake: Snake -> bool , T if snake hit itself    
         return snake[0] in snake[1:]
 
-    def snake_changed_direction(self, direction, key):
+    def snake1_changed_direction(self, direction, key):
         """Checks whether the user pressed a key that's in a different direction
         compared to the direction of the snake's movement."""
         # direction: str, inputs: dict -> bool
@@ -113,7 +139,21 @@ class GameBody:
             if key == k and direction == d:
                 return False
         return True
-
+    
+    def snake2_changed_direction(self, direction, key):
+        """Checks whether the user pressed a key that's in a different direction
+        compared to the direction of the snake's movement."""
+        # direction: str, inputs: dict -> bool
+        Opposite = {
+                'sw_4': 'right',
+                'sw_5': 'left',
+                'sw_6': 'down',
+                'sw_7': 'up'
+                }
+        for k, d in Opposite.items():
+            if key == k and direction == d:
+                return False
+        return True
 
     def extend_snake_head(self, snake, direction):
         """Extends the snake head one space in the given direction. 
@@ -146,46 +186,114 @@ class GameBody:
         tail = snake.pop()
         #window.addch(*tail, ' ') # clears the tail on screen, figure out how to do this without window
 
+    def init_grid(self):
+        self.grid = [[' ' for _ in range(self.w)] for _ in range(self.h)]
+
+    def snake_hit_other(self, snake_a, snake_b):
+        """Returns True if snake_a's head hits any part of snake_b."""
+        return snake_a[0] in snake_b
+
+    def print_grid(self):
+        
+        for y in range(self.h):
+            self.grid[y][0] = '|'
+            self.grid[y][self.w - 1] = '|'
+        for x in range(self.w):
+            self.grid[0][x] = '-'
+            self.grid[self.h - 1][x] = '-'
+        self.grid[0][0] = self.grid[0][self.w - 1] = '+'
+        self.grid[self.h - 1][0] = self.grid[self.h - 1][self.w - 1] = '+'
+        for row in self.grid[:self.h]:  # limit output height for readability
+            print(''.join(row[:self.w]))  # limit output width for readability    
+    
     def run(self):
         #Game logic, returns score: int 
         window_size = [self.w, self.h]  # (x, y) of VGA display
-        snake = self.init_snake()  # starting snake
-        self.draw_snake(snake)
+        snake1, snake2 = self.init_snake()  # starting snake
+        self.draw_snake1(snake1)
+        self.draw_snake2(snake2)
+        
         food = self.Gen_food(window_size)  # generate food
         food = [22, 10]
         self.draw_food(food)  # draw food on the screen
+        
         inputs = self.read_inputs()
-        DIRECTIONS = {
+        
+        self.print_grid()
+        
+        DIRECTIONS1 = {
             'btn_l': 'left',
             'btn_r': 'right',
             'btn_u': 'up',
             'btn_d': 'down'
         }
+        DIRECTIONS2 = {
+            'sw_4': 'left',
+            'sw_5': 'right',
+            'sw_6': 'up',
+            'sw_7': 'down'
+        }
         # set initial direction for snake 1
-        key, direction = 'btn_d', 'down'
+        key1, direction1 = 'btn_d', 'down'
+        key2, direction2 = 'sw_7', 'down'
         #use inputs['din'] to select difficulty
         while inputs['btn_c'] == 0:
             time.sleep(0.01)  # wait for signal 
             inputs = self.read_inputs() # need to loop func to read signal
+            
+        difficulty_raw = inputs['din']
+        speed = 0.5 # default speed when no switches are on (medium difficulty)
+        if difficulty_raw in DIFFICULTY_SPEEDS:
+            speed = DIFFICULTY_SPEEDS[difficulty_raw]
+        
         print("Game Start!")
         while True: 
-            time.sleep(0.1) # simulates a 10hz clock to slow down program
-            next_key = self.inputs_to_key(self.read_inputs())
-            key = next_key if next_key != None else key
-            print("This is Key: ", key)
-            direction = DIRECTIONS[key] if self.snake_changed_direction(direction, key) else direction
-            self.extend_snake_head(snake, direction) # changes the snake direction
-            if self.snake_ate_food(snake, food):
-                print("Snake Ate food!")
+            
+            time.sleep(speed) # simulates a 10hz clock to slow down program
+
+            # Snake 1 movements
+            next_key = self.inputs_to_key_p1(self.read_inputs())
+            key1 = next_key if next_key != None else key1
+            print("This is Key: ", key1)
+            direction1 = DIRECTIONS1[key1] if self.snake1_changed_direction(direction1, key1) else direction1
+            self.extend_snake_head(snake1, direction1) # changes the snake direction
+            if self.snake_ate_food(snake1, food):
+                print("Snake1 Ate food!")
                 food = self.Gen_food(window_size)
                 self.draw_food(food)
-                self.score += 1
+                self.score1 += 1
             else:
                 #print("Didn't eat food")
-                tail = self.shorten_snake(snake)
-            if (self.snake_hit_wall(snake, window_size) or self.snake_hit_self(snake)):
-                return self.score
-            self.draw_snake(snake)
+                self.shorten_snake(snake1)
+            if (self.snake_hit_wall(snake1, window_size) or 
+                self.snake_hit_self(snake1) or 
+                self.snake_hit_other(snake1, snake2)):
+                return self.score1
+            
+            # Snake 2 movements
+            next_key = self.inputs_to_key_p2(self.read_inputs())
+            key2 = next_key if next_key != None else key2
+            print("This is Key: ", key2)
+            direction2 = DIRECTIONS2[key2] if self.snake2_changed_direction(direction2, key2) else direction2
+            self.extend_snake_head(snake2, direction2) # changes the snake direction
+            if self.snake_ate_food(snake2, food):
+                print("Snake2 Ate food!")
+                food = self.Gen_food(window_size)
+                self.draw_food(food)
+                self.score2 += 1
+            else:
+                #print("Didn't eat food")
+                self.shorten_snake(snake2)
+            if (self.snake_hit_wall(snake2, window_size) or 
+                self.snake_hit_self(snake2) or 
+                self.snake_hit_other(snake2, snake1)):
+                return self.score2
+            
+            self.draw_snake1(snake1)
+            self.draw_snake2(snake2)
+            self.print_grid()
+            self.init_grid()
+            self.draw_food(food)
 
 def print_score(score):
     """Prints the score onto the screen."""
