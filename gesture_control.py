@@ -26,7 +26,7 @@ def gesture_rec():
     prev_x, prev_y = None, None
 
     # Open video
-    cap = cv2.VideoCapture("C:/Users/CLMNT/CENG3430_project/material.mp4")
+    cap = cv2.VideoCapture(1)
     if not cap.isOpened():
         print("Failed to open video.")
     else:
