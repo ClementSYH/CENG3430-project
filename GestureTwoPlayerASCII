@@ -1,0 +1,312 @@
+import cv2
+import numpy as np
+import copy
+import random
+import time
+from pynq import Overlay, MMIO
+
+class GestureControlledSnakeGame:
+    def __init__(self, bitfile_path):
+        # Initialize camera
+        self.cap = cv2.VideoCapture(0)
+        if not self.cap.isOpened():
+            raise IOError("Cannot open camera")
+        print("Camera initialized (running in background).")
+        
+        # Initialize game hardware
+        self.ol = Overlay(bitfile_path)
+        self.mmio = MMIO(0x43C00000, 0x1000)
+        
+        # Game parameters
+        self.score1 = 2
+        self.score2 = 2
+        self.w, self.h = 60, 30  # VGA/display dimension
+        self.grid = [[' ' for _ in range(self.w)] for _ in range(self.h)]
+        self.speed = 0.5
+        
+        # Gesture tracking variables
+        self.history_length = 10
+        self.centroid_history_1 = []  # For player 1 (right hand)
+        self.centroid_history_2 = []  # For player 2 (left hand)
+        
+        # Opposite direction mapping
+        self.opposite_directions = {
+            'up': 'down',
+            'down': 'up',
+            'left': 'right',
+            'right': 'left'
+        }
+
+    def read_inputs(self):
+        return {
+            'sw_0': (self.mmio.read(0x00) & 0x01) == 0x01,
+            'sw_1': (self.mmio.read(0x00) & 0x02) == 0x02,
+            'sw_2': (self.mmio.read(0x00) & 0x04) == 0x04,
+            'btn_c': (self.mmio.read(0x04) & 0x10) == 0x10
+        }
+
+    def get_two_hand_centroids(self, frame):
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        lower_skin = np.array([0, 30, 60], dtype=np.uint8)
+        upper_skin = np.array([20, 180, 255], dtype=np.uint8)
+        mask = cv2.inRange(hsv, lower_skin, upper_skin)
+        
+        kernel = np.ones((5, 5), np.uint8)
+        mask = cv2.dilate(mask, kernel, iterations=2)
+        mask = cv2.GaussianBlur(mask, (5, 5), 100)
+        
+        contours = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        contours = contours[0] if len(contours) == 2 else contours[1]
+        
+        centroids = []
+        if contours:
+            contours = sorted(contours, key=cv2.contourArea, reverse=True)
+            for cnt in contours[:2]:
+                if cv2.contourArea(cnt) < 1000:
+                    continue
+                M = cv2.moments(cnt)
+                if M["m00"] != 0:
+                    cx = int(M["m10"] / M["m00"])
+                    cy = int(M["m01"] / M["m00"])
+                    centroids.append((cx, cy))
+        return centroids
+    
+    def is_valid_direction_change(self, current_dir, new_dir):
+        if new_dir is None:
+            return current_dir
+        return new_dir if new_dir != self.opposite_directions.get(current_dir) else current_dir
+    
+    def get_direction(self, history, current_direction):
+        if len(history) < 2:
+            return current_direction
+        
+        dx = history[-1][0] - history[0][0]
+        dy = history[-1][1] - history[0][1]
+        threshold = 40
+        
+        new_dir = None
+        if abs(dx) > abs(dy):
+            new_dir = "right" if dx > threshold else "left" if dx < -threshold else None
+        else:
+            new_dir = "down" if dy > threshold else "up" if dy < -threshold else None
+        
+        return self.is_valid_direction_change(current_direction, new_dir)
+    
+    def process_camera_frame(self):
+        ret, frame = self.cap.read()
+        if not ret:
+            return None, None
+        
+        frame = cv2.flip(frame, 1)
+        frame = cv2.resize(frame, (320, 240))
+        centroids = self.get_two_hand_centroids(frame)
+        
+        dir1, dir2 = None, None
+        
+        # Process player 1 (right hand)
+        if len(centroids) >= 1:
+            self.centroid_history_1.append(centroids[0])
+            if len(self.centroid_history_1) > self.history_length:
+                self.centroid_history_1.pop(0)
+            dir1 = self.get_direction(self.centroid_history_1, self.direction1)
+        
+        # Process player 2 (left hand)
+        if len(centroids) == 2:
+            self.centroid_history_2.append(centroids[1])
+            if len(self.centroid_history_2) > self.history_length:
+                self.centroid_history_2.pop(0)
+            dir2 = self.get_direction(self.centroid_history_2, self.direction2)
+        
+        return dir1, dir2
+    
+    def init_snake(self):
+        snake1 = [
+            [15, 10],
+            [14, 10],
+            [13, 10],
+        ]
+        snake2 = [
+            [15, 40],
+            [14, 40],
+            [13, 40],
+            [12, 40],
+            [11, 40],
+            [10, 40],
+            [9, 40],
+            [8, 40],
+            [7, 40],
+        ]
+        return snake1, snake2
+    
+    def draw_snake1(self, snake):
+        snake_head, snake_body = snake[0], snake[1:]
+        print("Snake head position: ", snake_head)
+        print("Snake body position: ", snake_body)
+        self.grid[snake_head[0]][snake_head[1]] = '@'
+        for part in snake_body:
+            self.grid[part[0]][part[1]] = '#'
+    
+    def draw_snake2(self, snake):
+        snake_head, snake_body = snake[0], snake[1:]
+        print("Snake 2 head position: ", snake_head)
+        print("Snake 2 body position: ", snake_body)
+        self.grid[snake_head[0]][snake_head[1]] = 'X'
+        for part in snake_body:
+            self.grid[part[0]][part[1]] = 'o'
+    
+    def draw_food(self, food):
+        self.grid[food[0]][food[1]] = 'F'
+    
+    def snake_hit_wall(self, snake, window_size):
+        head = snake[0]
+        if head[0] > window_size[1]-1 or head[0] < 0 or head[1] < 0 or head[1] > window_size[0]-1:
+            return True
+        return False
+    
+    def snake_hit_self(self, snake):
+        return snake[0] in snake[1:]
+    
+    def snake_hit_other(self, snake_a, snake_b):
+        return snake_a[0] in snake_b
+    
+    def extend_snake_head(self, snake, direction):
+        head = copy.copy(snake[0])
+        if direction == 'left':
+            head[1] -= 1
+        elif direction == 'right':
+            head[1] += 1
+        elif direction == 'up':
+            head[0] -= 1
+        elif direction == 'down':
+            head[0] += 1
+        snake.insert(0, head)
+    
+    def Gen_food(self, window_size):
+        food = [random.randint(1, self.h-2), random.randint(1, self.w-2)]
+        return food
+    
+    def snake_ate_food(self, snake, food):
+        return snake[0] == food
+    
+    def shorten_snake(self, snake):
+        snake.pop()
+    
+    def init_grid(self):
+        self.grid = [[' ' for _ in range(self.w)] for _ in range(self.h)]
+    
+    def print_grid(self):
+        # Clear screen (works in most terminals)
+        print("\033[H\033[J", end="")
+        
+        # Draw borders
+        for y in range(self.h):
+            self.grid[y][0] = '|'
+            self.grid[y][self.w - 1] = '|'
+        for x in range(self.w):
+            self.grid[0][x] = '-'
+            self.grid[self.h - 1][x] = '-'
+        self.grid[0][0] = self.grid[0][self.w - 1] = '+'
+        self.grid[self.h - 1][0] = self.grid[self.h - 1][self.w - 1] = '+'
+        
+        # Print header
+        print(f"Player 1 (Green @): {self.score1}  |  Player 2 (Red X): {self.score2}")
+        print("Controls: Move hands to change direction")
+        
+        # Print grid
+        for row in self.grid[:self.h]:
+            print(''.join(row[:self.w]))
+    
+    def run(self):
+        window_size = [self.w, self.h]
+        snake1, snake2 = self.init_snake()
+        food = self.Gen_food(window_size)
+        food = [22, 10]
+        
+        # Initial directions
+        self.direction1 = 'down'
+        self.direction2 = 'down'
+        
+        speed = 0.5 # default speed
+        
+        # Wait for button press to start
+        print("Waiting for button press to start game...")
+        inputs = self.read_inputs()
+        while not inputs['btn_c']:
+            time.sleep(0.01)
+            inputs = self.read_inputs()
+            # Check speed switches
+            if inputs['sw_0'] and not inputs['sw_1'] and not inputs['sw_2']:
+                self.speed = 0.1  # Fast
+            elif not inputs['sw_0'] and inputs['sw_1'] and not inputs['sw_2']:
+                self.speed = 0.5  # Medium
+            elif not inputs['sw_0'] and not inputs['sw_1'] and inputs['sw_2']:
+                self.speed = 0.8  # Slow
+        
+        print("Game Start! Use hand gestures to control the snakes.")
+        
+        try:
+            while True:
+                start_time = time.time()
+                
+                # Process camera input
+                dir1, dir2 = self.process_camera_frame()
+                if dir1:
+                    self.direction1 = dir1
+                if dir2:
+                    self.direction2 = dir2
+                
+                # Player 1 movement
+                self.extend_snake_head(snake1, self.direction1)
+                if self.snake_ate_food(snake1, food):
+                    food = self.Gen_food(window_size)
+                    self.score1 += 1
+                else:
+                    self.shorten_snake(snake1)
+                
+                if (self.snake_hit_wall(snake1, window_size) or 
+                    self.snake_hit_self(snake1) or 
+                    self.snake_hit_other(snake1, snake2)):
+                    return self.score1, self.score2
+                
+                # Player 2 movement
+                self.extend_snake_head(snake2, self.direction2)
+                if self.snake_ate_food(snake2, food):
+                    food = self.Gen_food(window_size)
+                    self.score2 += 1
+                else:
+                    self.shorten_snake(snake2)
+                
+                if (self.snake_hit_wall(snake2, window_size) or 
+                    self.snake_hit_self(snake2) or 
+                    self.snake_hit_other(snake2, snake1)):
+                    return self.score1, self.score2
+                
+                # Update game display
+                self.init_grid()
+                self.draw_snake1(snake1)
+                self.draw_snake2(snake2)
+                self.draw_food(food)
+                self.print_grid()
+                
+                # Maintain game speed
+                elapsed = time.time() - start_time
+                if elapsed < self.speed:
+                    time.sleep(self.speed - elapsed)
+                
+        except KeyboardInterrupt:
+            return self.score1, self.score2
+        finally:
+            self.cap.release()
+
+def print_scores(score1, score2):
+    print('Game Over!')
+    print('Player 1 Score:', score1)
+    print('Player 2 Score:', score2)
+
+def main():
+    game = GestureControlledSnakeGame("./block_05_12.bit")
+    score1, score2 = game.run()
+    print_scores(score1, score2)
+
+if __name__ == '__main__':
+    main()
